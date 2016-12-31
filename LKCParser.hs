@@ -3,6 +3,7 @@ import Control.Applicative
 import Data.Char
 
 -- let x=2 and y=4 in x+y*2 end
+-- "letrec fact=lambda(n) if eq(n,1) then 1 else n* fact (n-1) and x=cons(1, cons( 2,null)) and f = lambda (l,g) if eq(l, null) then null else cons(g (head(l)), f (g, tail (l))) in x+y*2 end"
 data LKC = VAR String | NUM Int | NULL | ADD LKC LKC |
            SUB LKC LKC | MULT LKC LKC | DIV LKC LKC |
            EQ LKC LKC | LEQ LKC LKC | H LKC | T LKC | CONS LKC LKC |
@@ -155,149 +156,168 @@ nats = do symbol "["
           return (n:ns)
 
 --parse a sequence of variables
-parserSeqVar :: Parser String
+parserSeqVar :: Parser [LKC]
 parserSeqVar = do x <- identifier
-                  var <- parserSeqVar
-                  return (x ++ " " ++ var)
+                  do symbol ","
+                     vars <- parserSeqVar
+                     return ((VAR x):vars)
+                     <|>
+                     return [VAR x]
                   <|>
-                  return ""
+                  return []
 
 --parse an operation with prefix operator
-parserOPP :: Parser String
-parserOPP = do symbol "cons"
-               return "cons"
-            <|>
-            do symbol "head"
-               return "head"
-            <|>
-            do symbol "tail"
-               return "tail"
-            <|>
-            do symbol "eq"
-               return "eq"
-            <|>
-            do symbol "leq"
-               return "leq"
+parserOPP2 :: Parser (LKC->LKC->LKC)
+parserOPP2 = do symbol "cons"
+                return CONS
+             <|>
+             do symbol "eq"
+                return Main.EQ
+             <|>
+             do symbol "leq"
+                return LEQ
+
+parserOPP1 :: Parser (LKC->LKC)
+parserOPP1 = do symbol "head"
+                return H
+             <|>
+             do symbol "tail"
+                return T
+            
 
 --parse a multiplicative operation with infix operator
-parserOPM :: Parser String
+parserOPM :: Parser (LKC -> LKC -> LKC)
 parserOPM = do symbol "*"
-               return "*"
+               return MULT
             <|>
             do symbol "/"
-               return "/"
+               return DIV
 
 --parse a aritmetic operation with infix operator
-parserOPA :: Parser String
+parserOPA :: Parser (LKC -> LKC -> LKC)
 parserOPA = do symbol "+"
-               return "+"
+               return ADD
             <|>
             do symbol "-"
-               return "-"
+               return SUB
 
-parserExpa :: Parser String
+parserExpa :: Parser LKC
 parserExpa = do term <- parserTerm
                 do opa <- parserOPA
                    expa <- parserExpa
-                   return (term ++ opa ++ expa)
+                   return (opa term expa)
                    <|>
                    return term
 
-parserFactor :: Parser String
-parserFactor = do x <- identifier
+parserFactor :: Parser LKC
+parserFactor = do symbol "null"
+                  return (NULL)
+               <|>
+               do x <- identifier
                   (do y <- parserY
-                      return (x ++ y)
+                      return (CALL (VAR x) (y))
                    <|>
-                   return x)
+                   return (VAR x))
                <|>
                do num <- int
-                  return (show num)
-               <|>
-               do symbol "null"
-                  return "null"
+                  return (NUM num)
                <|>
                do symbol "("
                   expa <- parserExpa
                   symbol ")"
-                  return ("(" ++ expa ++ ")")
+                  return (expa)
 
-parserTerm :: Parser String
+parserTerm :: Parser LKC
 parserTerm = do factor <- parserFactor
                 do opm <- parserOPM
                    term <- parserTerm
-                   return (factor ++ opm ++ term)
+                   return (opm factor term)
                    <|>
-                   return factor
+                   return (factor)
 
 --parse a sequence of expressions
-parserSeqExpr :: Parser String
+parserSeqExpr :: Parser [LKC]
 parserSeqExpr = do expr <- parserExp
                    do symbol ","
                       exprs <- parserSeqExpr
-                      return (expr ++ "," ++exprs)
+                      return (expr:exprs)
                       <|>
-                      return expr
+                      return ([expr])
 
 --parse the parameters for a function
-parserY :: Parser String
+parserY :: Parser [LKC]
 parserY = do symbol "("
              seq_expr <- parserSeqExpr
              symbol ")"
-             return ("(" ++ seq_expr ++ ")")
+             return (seq_expr)
           <|>
           do symbol "("
              symbol ")"
-             return "()"
+             return []
 
-parserExp :: Parser String
-parserExp = do prog <- parserProg
-               return prog
-            <|> 
-            do symbol "lambda"
+parserExp :: Parser LKC
+parserExp = do symbol "lambda"
                symbol "("
                seq_var <- parserSeqVar
                symbol ")"
                expr <- parserExp
-               return ("lambda(" ++ seq_var ++ ")" ++ expr)
-            <|> 
-            do expa <- parserExpa
-               return expa
-            <|> 
-            do opp <- parserOPP
+               return (LAMBDA seq_var expr)
+            <|>
+            do opp2 <- parserOPP2
                symbol "("
-               seq_var <- parserSeqVar
+               expr1 <- parserExp
+               symbol ","
+               expr2 <- parserExp
                symbol ")"
-               return (opp ++ "(" ++ seq_var ++ ")")
+               return (opp2 expr1 expr2)
             <|> 
+            do opp1 <- parserOPP1
+               symbol "("
+               expr1 <- parserExp
+               symbol ")"
+               return (opp1 expr1)
+            <|> 
+            do prog <- parserProg
+               return prog
+            <|>
             do symbol "if"
                test <- parserExp
                symbol "then"
                ifTrue <- parserExp
                symbol "else"
                ifFalse <- parserExp
-               return ("if " ++ test ++ " then " ++ ifTrue ++ " else " ++ ifFalse)
+               return (IF test ifTrue ifFalse)
+            <|> 
+            do expa <- parserExpa
+               return expa
 
-parserBind :: Parser String
+parserBind :: Parser [(LKC, LKC)]
 parserBind = do x <- identifier
                 symbol "="
                 expr <- parserExp
                 do symbol "and"
                    bind <- parserBind
-                   return (x ++ "=" ++ expr ++ "and" ++ bind)
+                   return ((VAR x, expr) : bind)
                    <|>
-                   return (x ++ "=" ++ expr)
+                   return [(VAR x, expr)]
 
-parserProg :: Parser String
+parserProg :: Parser LKC
 parserProg = do symbol "let"
                 bind <- parserBind
                 symbol "in"
                 expr <- parserExp
                 symbol "end"
-                return ("let " ++ bind ++ " in " ++ expr ++ " end")
+                return (LET expr bind)
              <|> 
              do symbol "letrec"
                 bind <- parserBind
                 symbol "in"
                 expr <- parserExp
                 symbol "end"
-                return ("letrec " ++ bind ++ " in " ++ expr ++ " end")
+                return (LETREC expr bind)
+
+eval :: String -> LKC
+eval s = case (parse parserExp s) of 
+              [(lkc,[])] -> lkc
+              [(_,out)] -> error ("unused input: " ++ out)
+              [] -> error ("invalid input")
