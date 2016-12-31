@@ -2,6 +2,7 @@ import Control.Monad
 import Control.Applicative
 import Data.Char
 
+-- let x=2 and y=4 in x+y*2 end
 data LKC = VAR String | NUM Int | NULL | ADD LKC LKC |
            SUB LKC LKC | MULT LKC LKC | DIV LKC LKC |
            EQ LKC LKC | LEQ LKC LKC | H LKC | T LKC | CONS LKC LKC |
@@ -104,7 +105,7 @@ ident = do x <- lower
            return (x:xs)
 
 --parse a natural number
-nat :: Parser String
+nat :: Parser Int
 nat = do xs <- some digit
          return (read xs)
 
@@ -117,7 +118,7 @@ space = do many (sat isSpace)
 int :: Parser Int
 int = do char '-'
          n <- nat
-         return (-n)
+         return (-1 * n)
          <|>
          nat
 
@@ -146,9 +147,157 @@ symbol xs = token (string xs)
 
 --parse an array of integer
 nats :: Parser [Int]
-nats = do symbol '['
+nats = do symbol "["
           n <- natural
-          ns <- many (do symbol ','
+          ns <- many (do symbol ","
                          natural)
-          symbol ']'
+          symbol "]"
           return (n:ns)
+
+--parse a sequence of variables
+parserSeqVar :: Parser String
+parserSeqVar = do x <- identifier
+                  var <- parserSeqVar
+                  return (x ++ " " ++ var)
+                  <|>
+                  return ""
+
+--parse an operation with prefix operator
+parserOPP :: Parser String
+parserOPP = do symbol "cons"
+               return "cons"
+            <|>
+            do symbol "head"
+               return "head"
+            <|>
+            do symbol "tail"
+               return "tail"
+            <|>
+            do symbol "eq"
+               return "eq"
+            <|>
+            do symbol "leq"
+               return "leq"
+
+--parse a multiplicative operation with infix operator
+parserOPM :: Parser String
+parserOPM = do symbol "*"
+               return "*"
+            <|>
+            do symbol "/"
+               return "/"
+
+--parse a aritmetic operation with infix operator
+parserOPA :: Parser String
+parserOPA = do symbol "+"
+               return "+"
+            <|>
+            do symbol "-"
+               return "-"
+
+parserExpa :: Parser String
+parserExpa = do term <- parserTerm
+                do opa <- parserOPA
+                   expa <- parserExpa
+                   return (term ++ opa ++ expa)
+                   <|>
+                   return term
+
+parserFactor :: Parser String
+parserFactor = do x <- identifier
+                  (do y <- parserY
+                      return (x ++ y)
+                   <|>
+                   return x)
+               <|>
+               do num <- int
+                  return (show num)
+               <|>
+               do symbol "null"
+                  return "null"
+               <|>
+               do symbol "("
+                  expa <- parserExpa
+                  symbol ")"
+                  return ("(" ++ expa ++ ")")
+
+parserTerm :: Parser String
+parserTerm = do factor <- parserFactor
+                do opm <- parserOPM
+                   term <- parserTerm
+                   return (factor ++ opm ++ term)
+                   <|>
+                   return factor
+
+--parse a sequence of expressions
+parserSeqExpr :: Parser String
+parserSeqExpr = do expr <- parserExp
+                   do symbol ","
+                      exprs <- parserSeqExpr
+                      return (expr ++ "," ++exprs)
+                      <|>
+                      return expr
+
+--parse the parameters for a function
+parserY :: Parser String
+parserY = do symbol "("
+             seq_expr <- parserSeqExpr
+             symbol ")"
+             return ("(" ++ seq_expr ++ ")")
+          <|>
+          do symbol "("
+             symbol ")"
+             return "()"
+
+parserExp :: Parser String
+parserExp = do prog <- parserProg
+               return prog
+            <|> 
+            do symbol "lambda"
+               symbol "("
+               seq_var <- parserSeqVar
+               symbol ")"
+               expr <- parserExp
+               return ("lambda(" ++ seq_var ++ ")" ++ expr)
+            <|> 
+            do expa <- parserExpa
+               return expa
+            <|> 
+            do opp <- parserOPP
+               symbol "("
+               seq_var <- parserSeqVar
+               symbol ")"
+               return (opp ++ "(" ++ seq_var ++ ")")
+            <|> 
+            do symbol "if"
+               test <- parserExp
+               symbol "then"
+               ifTrue <- parserExp
+               symbol "else"
+               ifFalse <- parserExp
+               return ("if " ++ test ++ " then " ++ ifTrue ++ " else " ++ ifFalse)
+
+parserBind :: Parser String
+parserBind = do x <- identifier
+                symbol "="
+                expr <- parserExp
+                do symbol "and"
+                   bind <- parserBind
+                   return (x ++ "=" ++ expr ++ "and" ++ bind)
+                   <|>
+                   return (x ++ "=" ++ expr)
+
+parserProg :: Parser String
+parserProg = do symbol "let"
+                bind <- parserBind
+                symbol "in"
+                expr <- parserExp
+                symbol "end"
+                return ("let " ++ bind ++ " in " ++ expr ++ " end")
+             <|> 
+             do symbol "letrec"
+                bind <- parserBind
+                symbol "in"
+                expr <- parserExp
+                symbol "end"
+                return ("letrec " ++ bind ++ " in " ++ expr ++ " end")
