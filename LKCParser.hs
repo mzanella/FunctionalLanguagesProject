@@ -3,7 +3,10 @@ import Control.Applicative
 import Data.Char
 
 -- eval "let x=2 and y=4 in x+y*2 end"
+-- 
 -- eval "letrec fact=lambda(n) if eq(n,1) then 1 else n* fact (n-1) and x=cons(1, cons( 2,null)) and f = lambda (l,g) if eq(l, null) then null else cons(g (head(l)), f (g, tail (l))) in f(x,fact) end"
+-- LETREC (CALL (VAR "f") [VAR "x",VAR "fact"]) [(VAR "fact",LAMBDA [VAR "n"] (IF (EQ (VAR "n") (NUM 1)) (NUM 1) (MULT (VAR "n") (CALL (VAR "fact") [SUB (VAR "n") (NUM 1)])))),(VAR "x",CONS (NUM 1) (CONS (NUM 2) NULL)),(VAR "f",LAMBDA [VAR "l",VAR "g"] (IF (EQ (VAR "l") NULL) NULL (CONS (CALL (VAR "g") [H (VAR "l")]) (CALL (VAR "f") [VAR "g",T (VAR "l")]))))]
+
 
 -- tree data type to represent value parsed from the given grammar
 data LKC = VAR String | NUM Int | NULL | ADD LKC LKC |
@@ -224,7 +227,25 @@ parserOPP1 = do symbol "head"
              <|>
              do symbol "tail"
                 return T
-            
+
+-- parse a "system" function call
+-- parse parserOPP "head(1)" -> [(H (NUM 1),"")]            
+-- parse parserOPP "head(1,2,3)" -> []
+-- parse parserOPP "cons(1,2)" -> [(CONS (NUM 1) (NUM 2),"")]
+parserOPP :: Parser LKC
+parserOPP = do opp2 <- parserOPP2
+               parameters <- parserY
+               case (length parameters)==2 of 
+                  True -> return (opp2 (parameters!!0) (parameters!!1))
+                  otherwise -> empty
+               -- parse a function with 2 parameters
+            <|> 
+            do opp1 <- parserOPP1
+               parameters <- parserY
+               case (length parameters)==1 of 
+                  True -> return (opp1 (parameters!!0))
+                  otherwise -> empty
+               -- parse a function with 2 parameters
 
 --parse a multiplicative operation (*,/) with infix operator
 parserOPM :: Parser (LKC -> LKC -> LKC)
@@ -328,44 +349,41 @@ parserProg = do symbol "let"
                 expr <- parserExp
                 symbol "end"
                 return (LETREC expr bind)
+-- parse an if-then-else construct
+-- parse parserIf "if eq(x,y) then x else y" -> [(IF (EQ (VAR "x") (VAR "y")) (VAR "x") (VAR "y"),"")]
+parserIf :: Parser LKC
+parserIf = do symbol "if"
+              test <- parserExp
+              symbol "then"
+              ifTrue <- parserExp
+              symbol "else"
+              ifFalse <- parserExp
+              return (IF test ifTrue ifFalse)
+
+-- parse a lambda function
+-- parse parserLambda "lambda (n) n*2" -> [(LAMBDA [VAR "n"] (MULT (VAR "n") (NUM 2)),"")]
+parserLambda :: Parser LKC
+parserLambda = do symbol "lambda"
+                  parameters <- parserY
+                  expr <- parserExp
+                  return (LAMBDA parameters expr)
 
 -- parse an lkc expression
 parserExp :: Parser LKC
-parserExp = do symbol "lambda"
-               symbol "("
-               seq_var <- parserSeqVar
-               symbol ")"
-               expr <- parserExp
-               return (LAMBDA seq_var expr)
+parserExp = do lambda <- parserLambda
+               return lambda
                -- parse a lambda expression
             <|>
-            do opp2 <- parserOPP2
-               symbol "("
-               expr1 <- parserExp
-               symbol ","
-               expr2 <- parserExp
-               symbol ")"
-               return (opp2 expr1 expr2)
-               -- parse a function with 2 parameters
-            <|> 
-            do opp1 <- parserOPP1
-               symbol "("
-               expr1 <- parserExp
-               symbol ")"
-               return (opp1 expr1)
-               -- parse a function with 1 parameter
+            do fun <- parserOPP
+               return fun
+               -- parse a "system" function call
             <|> 
             do prog <- parserProg
                return prog
                -- parse an lkc program
             <|>
-            do symbol "if"
-               test <- parserExp
-               symbol "then"
-               ifTrue <- parserExp
-               symbol "else"
-               ifFalse <- parserExp
-               return (IF test ifTrue ifFalse)
+            do ifConstr <- parserIf
+               return ifConstr
                -- parse an if-then-else construct
             <|> 
             do expa <- parserExpa
