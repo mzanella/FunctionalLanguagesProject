@@ -234,18 +234,20 @@ parserOPP1 = do symbol "head"
 -- parse parserOPP "cons(1,2)" -> [(CONS (NUM 1) (NUM 2),"")]
 parserOPP :: Parser LKC
 parserOPP = do opp2 <- parserOPP2
-               parameters <- parserY
-               case (length parameters)==2 of 
-                  True -> return (opp2 (parameters!!0) (parameters!!1))
-                  otherwise -> empty
+               symbol "("
+               expr1 <- parserExp
+               symbol ","
+               expr2 <- parserExp
+               symbol ")"
+               return (opp2 expr1 expr2)
                -- parse a function with 2 parameters
             <|> 
             do opp1 <- parserOPP1
-               parameters <- parserY
-               case (length parameters)==1 of 
-                  True -> return (opp1 (parameters!!0))
-                  otherwise -> empty
-               -- parse a function with 2 parameters
+               symbol "("
+               expr1 <- parserExp
+               symbol ")"
+               return (opp1 expr1)
+               -- parse a function with 1 parameter
 
 --parse a multiplicative operation (*,/) with infix operator
 parserOPM :: Parser (LKC -> LKC -> LKC)
